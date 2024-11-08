@@ -211,7 +211,7 @@ impl<'a> PartialSchedule<'a> {
             memory_usage: (0..system.resources.len()).map(|_| Treap::new()).collect(),
             data_locations: HashMap::new(),
             task_locations: HashMap::new(),
-            task_resource: vec![0; dag.get_tasks().len()],
+            task_resource: vec![system.resources.len(); dag.get_tasks().len()],
             scheduled_tasks: system
                 .resources
                 .iter()
@@ -225,6 +225,7 @@ impl<'a> PartialSchedule<'a> {
     }
 
     pub fn assign_task(&mut self, task: usize, resource: usize) -> Rollback {
+        assert!(self.dag.get_task(task).is_allowed_on(resource));
         let mut rollback = Rollback::default();
         rollback.task = task;
         rollback.resource = resource;
