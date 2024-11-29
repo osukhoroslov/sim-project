@@ -17,35 +17,35 @@ fn zero() -> u64 {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct DataItem {
-    name: String,
+pub struct DataItem {
+    pub name: String,
     // expected unit: MB
-    size: f64,
+    pub size: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Task {
-    name: String,
+pub struct Task {
+    pub name: String,
     // expected unit: Gflops
-    flops: f64,
+    pub flops: f64,
     #[serde(default = "zero")]
     // expected unit: MB
-    memory: u64,
+    pub memory: u64,
     #[serde(default = "one")]
-    min_cores: u32,
+    pub min_cores: u32,
     #[serde(default = "one")]
-    max_cores: u32,
-    cores_dependency: Option<Value>,
+    pub max_cores: u32,
+    pub cores_dependency: Option<Value>,
     #[serde(default)]
-    inputs: Vec<String>,
-    outputs: Vec<DataItem>,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<DataItem>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Yaml {
-    tasks: Vec<Task>,
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Yaml {
+    pub tasks: Vec<Task>,
     #[serde(default = "Vec::new")]
-    inputs: Vec<DataItem>,
+    pub inputs: Vec<DataItem>,
 }
 
 impl DAG {

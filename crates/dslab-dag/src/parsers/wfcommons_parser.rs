@@ -6,7 +6,7 @@ use std::path::Path;
 use rand::prelude::*;
 use rand_pcg::Pcg64;
 use serde::{Deserialize, Serialize};
-use serde_json::from_str;
+use serde_json::{from_str, from_value};
 
 use dslab_compute::multicore::CoresDependency;
 
@@ -14,8 +14,47 @@ use crate::dag::*;
 use crate::parsers::config::ParserConfig;
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskSpec {
+    id: String,
+    parents: Vec<String>,
+    children: Vec<String>,
+    input_files: Option<Vec<String>>,
+    output_files: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FileSpec {
+    id: String,
+    size_in_bytes: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Specification {
+    tasks: Vec<TaskSpec>,
+    files: Option<Vec<FileSpec>>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskExec {
+    // Task id
+    id: String,
+    // Task runtime in seconds
+    runtime_in_seconds: f64,
+    // Number of cores required by the task
+    core_count: Option<f64>, // some files specify cores as "1.0"
+    // Memory (resident set) size of the process in bytes
+    memory_in_bytes: Option<u64>,
+    // Machine used for task execution
+    machines: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Deserialize)]
 struct Cpu {
     // CPU speed in MHz
+    #[serde(rename = "speedInMHz")]
     speed: Option<u64>,
 }
 
@@ -25,76 +64,27 @@ struct Machine {
     #[serde(rename = "nodeName")]
     name: String,
     // Machine's CPU information
-    cpu: Cpu,
+    cpu: Option<Cpu>,
 }
 
 #[derive(Serialize, Deserialize)]
-struct File {
-    // A human-readable name for the file
-    name: String,
-    // File size in KB (schema v1.3) or in bytes (schema v1.4)
-    #[serde(alias = "sizeInBytes")]
-    size: u64,
-    // Whether it is an input or output data
-    link: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Task {
-    // Task name
-    name: String,
-    // Task runtime in seconds
-    #[serde(alias = "runtimeInSeconds")]
-    runtime: f64,
-    // Number of cores required by the task
-    cores: Option<f64>, // some files specify cores as "1.0"
-    // Memory (resident set) size of the process in KB (schema v1.3) or in bytes (schema v1.4)
-    //
-    // TODO: Uncomment after this issue is fixed: https://github.com/wfcommons/makeflow-instances/issues/1
-    //
-    // #[serde(alias = "memoryInBytes")]
-    // memory: Option<u64>,
-    //
-    // Until then we have to resort to using both `memory_in_bytes` and `memory`.
-    #[serde(rename = "memoryInBytes")]
-    memory_in_bytes: Option<u64>,
-    memory: Option<u64>,
-    // Task input/output files
-    files: Vec<File>,
-    // Machine used for task execution
-    machine: Option<String>,
-    // Parent tasks.
-    parents: Vec<String>,
+struct Execution {
+    tasks: Vec<TaskExec>,
+    machines: Option<Vec<Machine>>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Workflow {
-    jobs: Option<Vec<Task>>,  // schema v1.2
-    tasks: Option<Vec<Task>>, // schema v1.3
-    #[serde(default = "Vec::new")]
-    machines: Vec<Machine>,
-}
-
-impl Workflow {
-    fn tasks(&self) -> &Vec<Task> {
-        if self.jobs.is_some() {
-            return self.jobs.as_ref().unwrap();
-        }
-        self.tasks.as_ref().unwrap()
-    }
+    specification: Specification,
+    // According to the specification, this field is optional. But we can't properly restore the graph without it.
+    execution: Execution,
 }
 
 #[derive(Serialize, Deserialize)]
-struct Wms {
-    name: String,
-}
-
-#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Json {
-    #[serde(rename = "schemaVersion")]
     schema_version: String,
     workflow: Workflow,
-    wms: Wms,
 }
 
 impl DAG {
@@ -107,32 +97,80 @@ impl DAG {
         let hash = hasher.finish();
         let mut rand = Pcg64::seed_from_u64(hash + config.seed.unwrap_or(123));
 
-        let json: Json = from_str(str).unwrap_or_else(|e| {
+        let raw_json: serde_json::Value = from_str(str).unwrap_or_else(|e| {
             panic!(
                 "Can't parse WfCommons json from file {}: {}",
                 file.as_ref().display(),
                 e
             )
         });
-        let schema_version = json.schema_version;
-        let wms = json.wms.name;
+
+        // Check if the schema is too old.
+        if let Some(ver) = raw_json.get("schemaVersion").and_then(|x| x.as_str()) {
+            let mut tokens = ver.split(".");
+            if let Some(first) = tokens.next().and_then(|x| x.parse::<i64>().ok()) {
+                if first <= 1 {
+                    if let Some(second) = tokens.next().and_then(|x| x.parse::<i64>().ok()) {
+                        if second <= 4 {
+                            return Self::from_wfcommons_legacy(file, config);
+                        }
+                    } else {
+                        return Self::from_wfcommons_legacy(file, config);
+                    }
+                }
+            }
+        }
+
+        let json: Json = from_value(raw_json).unwrap_or_else(|e| {
+            panic!(
+                "Can't parse WfCommons json from file {}: {}",
+                file.as_ref().display(),
+                e
+            )
+        });
+
         let workflow = json.workflow;
         let machine_speed: HashMap<String, f64> = workflow
+            .execution
             .machines
-            .iter()
-            .filter(|m| m.cpu.speed.is_some())
-            // machine.cpu.speed in WfCommons format actually refers to CPU speed in MHz,
-            // but it seems everyone use it as Mflop/s too...
-            // here we convert it to Gflop/s
-            .map(|machine| (machine.name.clone(), machine.cpu.speed.unwrap() as f64 / 1000.))
-            .collect();
+            .map(|x| {
+                x.iter()
+                    .filter(|m| m.cpu.is_some() && m.cpu.as_ref().unwrap().speed.is_some())
+                    // machine.cpu.speed in WfCommons format actually refers to CPU speed in MHz,
+                    // but it seems everyone use it as Mflop/s too...
+                    // here we convert it to Gflop/s
+                    .map(|machine| {
+                        (
+                            machine.name.clone(),
+                            machine.cpu.as_ref().unwrap().speed.unwrap() as f64 / 1000.,
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut file_size: HashMap<String, u64> = HashMap::new();
+        if let Some(files) = workflow.specification.files {
+            for file in &files {
+                file_size.insert(file.id.clone(), file.size_in_bytes);
+            }
+        }
         let mut dag = DAG::new();
         let mut data_items: HashMap<String, usize> = HashMap::new();
         let mut stage_mem: HashMap<String, u64> = HashMap::new();
         let mut stage_cores: HashMap<String, u32> = HashMap::new();
         let mut task_ids: HashMap<String, usize> = HashMap::new();
-        for task in workflow.tasks().iter() {
-            let stage = task.name.split('_').next().unwrap().to_string();
+        let mut task_in_files: HashMap<String, Vec<String>> = HashMap::new();
+        let mut task_out_files: HashMap<String, Vec<String>> = HashMap::new();
+        for task in workflow.specification.tasks.iter() {
+            if let Some(vec) = &task.input_files {
+                task_in_files.insert(task.id.clone(), vec.clone());
+            }
+            if let Some(vec) = &task.output_files {
+                task_out_files.insert(task.id.clone(), vec.clone());
+            }
+        }
+        for task in workflow.execution.tasks.iter() {
+            let stage = task.id.split('_').next().unwrap_or("none").to_string();
 
             let cores = if let Some(cores_conf) = &config.generate_cores {
                 if cores_conf.regular && stage_cores.contains_key(&stage) {
@@ -145,7 +183,7 @@ impl DAG {
                     cores
                 }
             } else {
-                task.cores.unwrap_or(1.) as u32
+                task.core_count.unwrap_or(1.) as u32
             };
 
             let memory = if config.ignore_memory {
@@ -160,78 +198,58 @@ impl DAG {
                     }
                     memory
                 }
+            } else if let Some(memory) = task.memory_in_bytes {
+                (memory as f64 / 1e6).ceil() as u64 // convert bytes to MB (round up to nearest)
             } else {
-                // TODO: Uncomment after this issue is fixed: https://github.com/wfcommons/makeflow-instances/issues/1
-                // let memory = task.memory.unwrap_or(0);
-                // if schema_version == "1.4" {
-                //     (memory as f64 / 1e6).ceil() as u64 // convert bytes to MB (round up to nearest)
-                // } else {
-                //     (memory as f64 / 1e3).ceil() as u64 // convert KB to MB (round up to nearest)
-                // }
-                if let Some(memory) = task.memory_in_bytes {
-                    (memory as f64 / 1e6).ceil() as u64 // convert bytes to MB (round up to nearest)
-                } else {
-                    (task.memory.unwrap_or(0) as f64 / 1e3).ceil() as u64 // convert KB to MB (round up to nearest)
-                }
+                0
             };
 
-            let mut flops = task.runtime * cores as f64;
-            if let Some(machine_speed) = task.machine.as_ref().and_then(|m| machine_speed.get(m)) {
-                flops *= *machine_speed;
+            let mut flops = task.runtime_in_seconds * cores as f64;
+            if let Some(machines) = task.machines.as_ref() {
+                if let Some(machine_speed) = machines.iter().next().and_then(|m| machine_speed.get(m)) {
+                    flops *= *machine_speed;
+                } else {
+                    flops *= config.reference_speed;
+                }
             } else {
                 flops *= config.reference_speed;
             }
 
-            let task_id = dag.add_task(&task.name, flops, memory, cores, cores, CoresDependency::Linear);
-            task_ids.insert(task.name.clone(), task_id);
-            for file in task.files.iter() {
-                if file.link == "output" {
-                    data_items.insert(
-                        file.name.clone(),
-                        dag.add_task_output(task_id, &file.name, file_size_in_mb(file.size, &schema_version, &wms)),
-                    );
+            let task_id = dag.add_task(&task.id, flops, memory, cores, cores, CoresDependency::Linear);
+            task_ids.insert(task.id.clone(), task_id);
+            if let Some(vec) = task_out_files.get(&task.id) {
+                for name in vec.iter() {
+                    if let Some(size) = file_size.get(name).copied() {
+                        data_items.insert(name.clone(), dag.add_task_output(task_id, name, size as f64 / 1e6));
+                    }
                 }
             }
         }
-        for (task_id, task) in workflow.tasks().iter().enumerate() {
+        for task in workflow.specification.tasks.iter() {
+            let task_id = *task_ids.get(&task.id).unwrap();
             let mut predecessors: HashSet<usize> = HashSet::new();
-            for file in task.files.iter() {
-                if file.link == "input" {
-                    if let Some(data_item_id) = data_items.get(&file.name) {
+            if let Some(vec) = task_in_files.get(&task.id) {
+                for name in vec.iter() {
+                    if let Some(data_item_id) = data_items.get(name) {
                         if let Some(producer) = dag.get_data_item(*data_item_id).producer {
                             predecessors.insert(producer);
                         }
                         dag.add_data_dependency(*data_item_id, task_id);
-                    } else {
-                        let data_item_id =
-                            dag.add_data_item(&file.name, file_size_in_mb(file.size, &schema_version, &wms));
-                        data_items.insert(file.name.clone(), data_item_id);
+                    } else if let Some(size) = file_size.get(name) {
+                        let data_item_id = dag.add_data_item(name, *size as f64 / 1e6);
+                        data_items.insert(name.clone(), data_item_id);
                         dag.add_data_dependency(data_item_id, task_id);
                     }
                 }
             }
             for parent in task.parents.iter() {
                 if !predecessors.contains(&task_ids[parent]) {
-                    let data_item_id =
-                        dag.add_task_output(task_ids[parent], &format!("{} -> {}", parent, task.name), 0.);
+                    let data_item_id = dag.add_task_output(task_ids[parent], &format!("{} -> {}", parent, task.id), 0.);
                     dag.add_data_dependency(data_item_id, task_id);
                     predecessors.insert(task_ids[parent]);
                 }
             }
         }
         dag
-    }
-}
-
-fn file_size_in_mb(size: u64, schema_version: &String, wms: &String) -> f64 {
-    // Pegasus instances pre 1.4 have file sizes in bytes by mistake!
-    // See https://github.com/wfcommons/pegasus-instances/issues/1
-    //
-    // TODO: Makeflow 1.4 instances still have sizes in KB, until this issue is fixed:
-    // https://github.com/wfcommons/makeflow-instances/issues/1
-    if (schema_version == "1.4" && wms != "Makeflow") || wms == "Pegasus" {
-        size as f64 / 1e6 // convert bytes to MB
-    } else {
-        size as f64 / 1e3 // convert KB to MB
     }
 }
