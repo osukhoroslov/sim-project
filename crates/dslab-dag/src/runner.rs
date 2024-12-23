@@ -32,6 +32,7 @@ use crate::trace_log::{Event as TraceEvent, Resource as TraceResource, TraceLog}
 #[derive(Clone)]
 pub struct Config {
     pub data_transfer_mode: DataTransferMode,
+    pub billing_interval: f64,
 }
 
 /// Represents a transfer of data item between resources.
@@ -105,6 +106,11 @@ impl DAGRunner {
             .enumerate()
             .map(|(idx, resource)| (resource.id, idx))
             .collect();
+        let resource_price = resources
+            .iter()
+            .enumerate()
+            .map(|(idx, resource)| (idx, resource.price))
+            .collect();
         let available_cores = resources
             .iter()
             .map(|resource| (0..resource.compute.borrow().cores_total()).collect())
@@ -132,7 +138,7 @@ impl DAGRunner {
             resource_data_items: HashMap::new(),
             available_cores,
             trace_log_enabled: true,
-            run_stats: RunStats::new(),
+            run_stats: RunStats::new(config.billing_interval, resource_price),
             config,
             ctx,
         }
@@ -141,6 +147,26 @@ impl DAGRunner {
     /// Enables or disables [trace log](TraceLog).
     pub fn enable_trace_log(&mut self, flag: bool) {
         self.trace_log_enabled = flag;
+    }
+
+    /// Returns DAG for this runner.
+    pub fn get_dag<'a>(&'a self) -> &'a DAG {
+        &self.dag
+    }
+
+    /// Returns resources for this runner.
+    pub fn get_resources<'a>(&'a self) -> &'a Vec<Resource> {
+        &self.resources
+    }
+
+    /// Returns network for this runner.
+    pub fn get_network<'a>(&'a self) -> Rc<RefCell<Network>> {
+        self.network.clone()
+    }
+
+    /// Returns simulation context for this runner.
+    pub fn get_context<'a>(&'a self) -> &'a SimulationContext {
+        &self.ctx
     }
 
     /// Starts DAG execution.
@@ -496,7 +522,7 @@ impl DAGRunner {
             },
         );
         self.run_stats
-            .set_transfer_start(data_id, data_item.size, self.ctx.time());
+            .set_transfer_start(data_item_id, data_item.size, self.ctx.time());
         if self.trace_log_enabled {
             self.trace_log.log_event(
                 &self.ctx,
@@ -656,7 +682,7 @@ impl DAGRunner {
         let data_id = data_transfer.data_id;
         let data_item = self.dag.get_data_item(data_id);
 
-        self.run_stats.set_transfer_finish(data_event_id, self.ctx.time());
+        self.run_stats.set_transfer_finish(data_id, self.ctx.time());
         if self.trace_log_enabled {
             self.trace_log.log_event(
                 &self.ctx,
@@ -697,6 +723,7 @@ impl DAGRunner {
         if self.is_completed() {
             self.run_stats.finalize(
                 self.ctx.time(),
+                &self.dag,
                 System {
                     resources: &self.resources,
                     network: &self.network.borrow(),

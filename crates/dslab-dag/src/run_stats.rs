@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::dag::DAG;
 use crate::system::System;
 
 /// Contains metrics collected from a simulation run.
@@ -18,6 +19,8 @@ pub struct RunStats {
     pub total_network_traffic: f64,
     /// Total time of data transfers over the network (in seconds).
     pub total_network_time: f64,
+    /// Workload makespan, calculated as the last event time.
+    pub makespan: f64,
     /// Maximum number of cores used at once.
     pub max_used_cores: u32,
     /// Maximum amount of memory used at once.
@@ -44,11 +47,15 @@ pub struct RunStats {
     pub cpu_utilization_active: f64,
     /// Average memory utilization for active resources only (analogous to cpu_utilization_active).
     pub memory_utilization_active: f64,
+    /// Total cost of DAG execution.
+    pub total_execution_cost: f64,
 
     #[serde(skip)]
     task_starts: HashMap<usize, (u32, u64, f64)>,
     #[serde(skip)]
     transfer_starts: HashMap<usize, f64>,
+    #[serde(skip)]
+    transfer_ends: HashMap<usize, f64>,
     #[serde(skip)]
     current_cores: u32,
     #[serde(skip)]
@@ -58,14 +65,22 @@ pub struct RunStats {
     #[serde(skip)]
     task_resource: HashMap<usize, usize>,
     #[serde(skip)]
+    resource_price: HashMap<usize, f64>,
+    #[serde(skip)]
     resource_first_used: HashMap<usize, f64>,
     #[serde(skip)]
     resource_last_used: HashMap<usize, f64>,
+    #[serde(skip)]
+    billing_interval: f64,
 }
 
 impl RunStats {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(billing_interval: f64, resource_price: HashMap<usize, f64>) -> Self {
+        Self {
+            resource_price,
+            billing_interval,
+            ..Default::default()
+        }
     }
 
     pub fn set_expected_makespan(&mut self, makespan: f64) {
@@ -94,7 +109,9 @@ impl RunStats {
         self.total_task_time += time - start_time;
         self.cpu_utilization += (time - start_time) * cores as f64;
         self.memory_utilization += (time - start_time) * memory as f64;
-        self.resource_last_used.insert(self.task_resource[&task], time);
+        let resource = self.task_resource[&task];
+        self.resource_last_used.insert(resource, time);
+        self.makespan = self.makespan.max(time);
     }
 
     pub fn set_transfer_start(&mut self, data_item: usize, size: f64, time: f64) {
@@ -103,12 +120,37 @@ impl RunStats {
     }
 
     pub fn set_transfer_finish(&mut self, data_item: usize, time: f64) {
-        self.total_network_time += time - self.transfer_starts.remove(&data_item).unwrap();
+        self.total_network_time += time - *self.transfer_starts.get(&data_item).unwrap();
+        self.transfer_ends.insert(data_item, time);
+        self.makespan = self.makespan.max(time);
     }
 
-    pub fn finalize(&mut self, time: f64, system: System) {
+    pub fn finalize(&mut self, time: f64, dag: &DAG, system: System) {
         assert!(self.task_starts.is_empty());
-        assert!(self.transfer_starts.is_empty());
+
+        for (item, time) in self.transfer_starts.iter() {
+            for consumer in dag.get_data_item(*item).consumers.iter().copied() {
+                let resource = *self.task_resource.get(&consumer).unwrap();
+                let used = self.resource_first_used.get_mut(&resource).unwrap();
+                *used = time.min(*used);
+            }
+        }
+
+        for (item, time) in self.transfer_ends.iter() {
+            if let Some(producer) = dag.get_data_item(*item).producer {
+                let resource = *self.task_resource.get(&producer).unwrap();
+                let used = self.resource_last_used.get_mut(&resource).unwrap();
+                *used = time.max(*used);
+            }
+        }
+
+        self.total_execution_cost = 0.;
+        for (resource, start) in self.resource_first_used.iter() {
+            let duration = self.resource_last_used.get(resource).unwrap() - *start;
+            let n_intervals = (duration - 1e-9).div_euclid(self.billing_interval) + 1.0;
+            let current_cost = n_intervals * (*self.resource_price.get(resource).unwrap());
+            self.total_execution_cost += current_cost;
+        }
 
         let mut total_cores = 0;
         let mut total_memory = 0;
