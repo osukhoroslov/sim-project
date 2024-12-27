@@ -150,22 +150,22 @@ impl DAGRunner {
     }
 
     /// Returns DAG for this runner.
-    pub fn get_dag<'a>(&'a self) -> &'a DAG {
+    pub fn get_dag(&self) -> &DAG {
         &self.dag
     }
 
     /// Returns resources for this runner.
-    pub fn get_resources<'a>(&'a self) -> &'a Vec<Resource> {
+    pub fn get_resources(&self) -> &Vec<Resource> {
         &self.resources
     }
 
     /// Returns network for this runner.
-    pub fn get_network<'a>(&'a self) -> Rc<RefCell<Network>> {
+    pub fn get_network(&self) -> Rc<RefCell<Network>> {
         self.network.clone()
     }
 
     /// Returns simulation context for this runner.
-    pub fn get_context<'a>(&'a self) -> &'a SimulationContext {
+    pub fn get_context(&self) -> &SimulationContext {
         &self.ctx
     }
 
@@ -307,10 +307,10 @@ impl DAGRunner {
         if !task.is_allowed_on(resource) {
             log_error!(
                 self.ctx,
-                "Wrong action, task {} isn't allowed to run on resource {} because of restriction: {:?}",
+                "Wrong action, task {} isn't allowed to run on resource {} because of restrictions: {:?}",
                 task_id,
                 resource,
-                task.resource_restriction,
+                task.resource_restrictions,
             );
             return;
         }
@@ -521,8 +521,12 @@ impl DAGRunner {
                 to,
             },
         );
-        self.run_stats
-            .set_transfer_start(data_item_id, data_item.size, self.ctx.time());
+        self.run_stats.set_transfer_start(
+            data_id,
+            data_item.size,
+            self.resource_indexes.get(&to).copied(),
+            self.ctx.time(),
+        );
         if self.trace_log_enabled {
             self.trace_log.log_event(
                 &self.ctx,
@@ -682,7 +686,11 @@ impl DAGRunner {
         let data_id = data_transfer.data_id;
         let data_item = self.dag.get_data_item(data_id);
 
-        self.run_stats.set_transfer_finish(data_id, self.ctx.time());
+        self.run_stats.set_transfer_finish(
+            data_event_id,
+            self.resource_indexes.get(&data_transfer.from).copied(),
+            self.ctx.time(),
+        );
         if self.trace_log_enabled {
             self.trace_log.log_event(
                 &self.ctx,
@@ -723,7 +731,6 @@ impl DAGRunner {
         if self.is_completed() {
             self.run_stats.finalize(
                 self.ctx.time(),
-                &self.dag,
                 System {
                     resources: &self.resources,
                     network: &self.network.borrow(),

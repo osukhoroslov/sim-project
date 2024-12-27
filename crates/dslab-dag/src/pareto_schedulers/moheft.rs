@@ -62,13 +62,13 @@ impl MOHeftScheduler {
         for task_id in task_ids.into_iter() {
             let mut new_schedules = Vec::new();
             for schedule in partial_schedules.into_iter() {
-                for i in 0..resources.len() {
+                for (i, r) in resources.iter().enumerate() {
                     let need_cores = dag.get_task(task_id).min_cores;
-                    if resources[i].compute.borrow().cores_total() < need_cores {
+                    if r.compute.borrow().cores_total() < need_cores {
                         continue;
                     }
                     let need_memory = dag.get_task(task_id).memory;
-                    if resources[i].compute.borrow().memory_total() < need_memory {
+                    if r.compute.borrow().memory_total() < need_memory {
                         continue;
                     }
                     if !dag.get_task(task_id).is_allowed_on(i) {
@@ -88,10 +88,6 @@ impl MOHeftScheduler {
             for i in remain.into_iter() {
                 new_new_schedules.push(new_schedules.swap_remove(i));
             }
-            /*println!("I have schedules:");
-            for s in &new_new_schedules {
-                println!("{} {}", s.makespan, s.cost);
-            }*/
             let mut dist = compute_crowding_distance(
                 &new_new_schedules
                     .iter()
@@ -226,11 +222,13 @@ impl<'a> PartialSchedule<'a> {
 
     pub fn assign_task(&mut self, task: usize, resource: usize) -> Rollback {
         assert!(self.dag.get_task(task).is_allowed_on(resource));
-        let mut rollback = Rollback::default();
-        rollback.task = task;
-        rollback.resource = resource;
-        rollback.makespan = self.makespan;
-        rollback.cost = self.cost;
+        let mut rollback = Rollback {
+            task,
+            resource,
+            makespan: self.makespan,
+            cost: self.cost,
+            ..Default::default()
+        };
         self.task_resource[task] = resource;
         let res = evaluate_assignment(
             task,

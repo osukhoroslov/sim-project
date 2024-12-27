@@ -63,13 +63,14 @@ impl ParetoSimulation {
         }
     }
     /// Pareto schedulers are run as follows:
-    /// 1) Run the scheduler in a fake simulation to produce Pareto front.
-    /// 2) Run a separate simulation for each schedule in the Pareto front by using the stub scheduler.
+    ///    1) Run the scheduler in a fake simulation to produce Pareto front.
+    ///    2) Run a separate simulation for each schedule in the Pareto front by using the stub scheduler.
+    ///
     /// Note that since the simulation is fake and the scheduler is static, the scheduler should not
-    /// emit any events or modify the simulation in any other way.
+    ///    emit any events or modify the simulation in any other way.
     pub fn run(&self, num_threads: usize) -> ParetoSimulationResult {
         let config = Config {
-            data_transfer_mode: self.data_transfer_mode.clone(),
+            data_transfer_mode: self.data_transfer_mode,
             billing_interval: self.billing_interval.unwrap_or(1.0),
         };
 
@@ -101,8 +102,8 @@ impl ParetoSimulation {
             let results = results.clone();
             let resources = self.resources.clone();
             let network = self.network.clone();
-            let data_transfer_mode = self.data_transfer_mode.clone();
-            let billing_interval = self.billing_interval.clone();
+            let data_transfer_mode = self.data_transfer_mode;
+            let billing_interval = self.billing_interval;
             let dag = self.dag.clone();
             pool.execute(move || {
                 let scheduler = Rc::new(RefCell::new(*scheduler_box));
@@ -113,7 +114,7 @@ impl ParetoSimulation {
                     network,
                     scheduler,
                     Config {
-                        data_transfer_mode: data_transfer_mode,
+                        data_transfer_mode,
                         billing_interval: billing_interval.unwrap_or(1.0),
                     },
                 );

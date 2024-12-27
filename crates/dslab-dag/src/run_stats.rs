@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::dag::DAG;
 use crate::system::System;
 
 /// Contains metrics collected from a simulation run.
@@ -53,9 +52,9 @@ pub struct RunStats {
     #[serde(skip)]
     task_starts: HashMap<usize, (u32, u64, f64)>,
     #[serde(skip)]
-    transfer_starts: HashMap<usize, f64>,
+    transfer_starts: HashMap<usize, (f64, Option<usize>)>,
     #[serde(skip)]
-    transfer_ends: HashMap<usize, f64>,
+    transfer_ends: HashMap<usize, (f64, Option<usize>)>,
     #[serde(skip)]
     current_cores: u32,
     #[serde(skip)]
@@ -114,34 +113,28 @@ impl RunStats {
         self.makespan = self.makespan.max(time);
     }
 
-    pub fn set_transfer_start(&mut self, data_item: usize, size: f64, time: f64) {
+    pub fn set_transfer_start(&mut self, data_id: usize, size: f64, receiver: Option<usize>, time: f64) {
         self.total_network_traffic += size;
-        self.transfer_starts.insert(data_item, time);
+        self.transfer_starts.insert(data_id, (time, receiver));
     }
 
-    pub fn set_transfer_finish(&mut self, data_item: usize, time: f64) {
-        self.total_network_time += time - *self.transfer_starts.get(&data_item).unwrap();
-        self.transfer_ends.insert(data_item, time);
+    pub fn set_transfer_finish(&mut self, data_id: usize, sender: Option<usize>, time: f64) {
+        self.total_network_time += time - self.transfer_starts.get(&data_id).unwrap().0;
+        self.transfer_ends.insert(data_id, (time, sender));
         self.makespan = self.makespan.max(time);
     }
 
-    pub fn finalize(&mut self, time: f64, dag: &DAG, system: System) {
+    pub fn finalize(&mut self, time: f64, system: System) {
         assert!(self.task_starts.is_empty());
 
-        for (item, time) in self.transfer_starts.iter() {
-            for consumer in dag.get_data_item(*item).consumers.iter().copied() {
-                let resource = *self.task_resource.get(&consumer).unwrap();
-                let used = self.resource_first_used.get_mut(&resource).unwrap();
-                *used = time.min(*used);
-            }
+        for (time, resource) in self.transfer_starts.values().filter(|x| x.1.is_some()) {
+            let used = self.resource_first_used.entry(resource.unwrap()).or_insert(*time);
+            *used = time.min(*used);
         }
 
-        for (item, time) in self.transfer_ends.iter() {
-            if let Some(producer) = dag.get_data_item(*item).producer {
-                let resource = *self.task_resource.get(&producer).unwrap();
-                let used = self.resource_last_used.get_mut(&resource).unwrap();
-                *used = time.max(*used);
-            }
+        for (time, resource) in self.transfer_ends.values().filter(|x| x.1.is_some()) {
+            let used = self.resource_last_used.entry(resource.unwrap()).or_insert(*time);
+            *used = time.max(*used);
         }
 
         self.total_execution_cost = 0.;

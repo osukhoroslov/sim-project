@@ -70,7 +70,7 @@ impl DagSimulation {
         if !self.resource_configs.iter().any(|r| r.name == "master") {
             self.add_resource("master", 1., 1, 0);
         }
-        let resources = self
+        let mut resources = self
             .resource_configs
             .iter()
             .map(|r| {
@@ -97,6 +97,9 @@ impl DagSimulation {
 
         self.add_input_output_tasks(&mut dag);
 
+        let runner_id = self.sim.create_context("runner").id();
+        resources.iter_mut().find(|r| r.name == "master").unwrap().id = runner_id;
+
         let runner = Rc::new(RefCell::new(DAGRunner::new(
             dag,
             network.clone(),
@@ -105,8 +108,8 @@ impl DagSimulation {
             self.config.clone(),
             self.sim.create_context("runner"),
         )));
-        let runner_id = self.sim.add_handler("runner", runner.clone());
-        self.network_config.init_network(network, runner_id, &resources);
+        self.sim.add_handler("runner", runner.clone());
+        self.network_config.init_network(network, &resources);
         let client = self.sim.create_context("client");
         client.emit_now(Start {}, runner_id);
         runner
@@ -151,12 +154,12 @@ impl DagSimulation {
         let master_resource = self.resource_configs.iter().position(|r| r.name == "master").unwrap();
 
         for task in 0..dag.get_tasks().len() {
-            dag.set_resource_restriction(task, ResourceRestriction::Except([master_resource].into()));
+            dag.add_resource_restriction(task, ResourceRestriction::Except([master_resource].into()));
         }
         if !dag.get_inputs().is_empty() {
             let inputs = dag.get_inputs().clone();
             let input_task = dag.add_task("input", 0., 0, 1, 1, CoresDependency::Linear);
-            dag.set_resource_restriction(input_task, ResourceRestriction::Only([master_resource].into()));
+            dag.add_resource_restriction(input_task, ResourceRestriction::Only([master_resource].into()));
             for &input in inputs.iter() {
                 dag.set_as_task_output(input, input_task);
             }
@@ -165,7 +168,7 @@ impl DagSimulation {
         if !dag.get_outputs().is_empty() {
             let outputs = dag.get_outputs().clone();
             let output_task = dag.add_task("output", 0., 0, 1, 1, CoresDependency::Linear);
-            dag.set_resource_restriction(output_task, ResourceRestriction::Only([master_resource].into()));
+            dag.add_resource_restriction(output_task, ResourceRestriction::Only([master_resource].into()));
             for &output in outputs.iter() {
                 dag.add_data_dependency(output, output_task);
             }
