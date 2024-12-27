@@ -645,23 +645,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dag-cloud-benchmark"
-version = "0.1.0"
-dependencies = [
- "clap 4.4.18",
- "dslab-compute",
- "dslab-dag",
- "env_logger 0.9.3",
- "indexmap 2.7.0",
- "log 0.4.20",
- "rand 0.8.5",
- "rand_pcg 0.3.1",
- "serde_json",
- "simcore",
- "sugars",
-]
-
-[[package]]
 name = "dag-demo"
 version = "0.1.0"
 dependencies = [
@@ -680,6 +663,18 @@ dependencies = [
  "once_cell",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "dag-pareto"
+version = "0.1.0"
+dependencies = [
+ "clap 4.4.18",
+ "dslab-compute",
+ "dslab-dag",
+ "env_logger 0.9.3",
+ "log 0.4.20",
+ "sugars",
 ]
 
 [[package]]
@@ -921,7 +916,6 @@ name = "dslab-network"
 version = "0.1.0"
 dependencies = [
  "dslab-models",
- "env_logger 0.10.2",
  "indexmap 2.7.0",
  "log 0.4.20",
  "rstest",
