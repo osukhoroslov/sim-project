@@ -113,14 +113,14 @@ impl RunStats {
         self.makespan = self.makespan.max(time);
     }
 
-    pub fn set_transfer_start(&mut self, data_id: usize, size: f64, receiver: Option<usize>, time: f64) {
+    pub fn set_transfer_start(&mut self, transfer_id: usize, size: f64, receiver: Option<usize>, time: f64) {
         self.total_network_traffic += size;
-        self.transfer_starts.insert(data_id, (time, receiver));
+        self.transfer_starts.insert(transfer_id, (time, receiver));
     }
 
-    pub fn set_transfer_finish(&mut self, data_id: usize, sender: Option<usize>, time: f64) {
-        self.total_network_time += time - self.transfer_starts.get(&data_id).unwrap().0;
-        self.transfer_ends.insert(data_id, (time, sender));
+    pub fn set_transfer_finish(&mut self, transfer_id: usize, sender: Option<usize>, time: f64) {
+        self.total_network_time += time - self.transfer_starts.get(&transfer_id).unwrap().0;
+        self.transfer_ends.insert(transfer_id, (time, sender));
         self.makespan = self.makespan.max(time);
     }
 
