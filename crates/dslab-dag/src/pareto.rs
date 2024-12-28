@@ -1,3 +1,5 @@
+//! Pareto-efficient multiobjective DAG scheduling.
+
 use std::boxed::Box;
 use std::cell::RefCell;
 use std::rc::Rc;
