@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use dslab_network::models::{ConstantBandwidthNetworkModel, SharedBandwidthNetworkModel, TopologyAwareNetworkModel};
 use dslab_network::{Link, Network};
 use simcore::context::SimulationContext;
+use simcore::Id;
 
 use crate::resource::Resource;
 
@@ -119,7 +120,7 @@ impl NetworkConfig {
     }
 
     /// Adds network nodes and links (in case of topology-aware or custom network model).
-    pub fn init_network(&self, network: Rc<RefCell<Network>>, resources: &[Resource]) {
+    pub fn init_network(&self, network: Rc<RefCell<Network>>, runner_id: Id, resources: &[Resource]) {
         let mut network = network.borrow_mut();
 
         // Add nodes
@@ -132,6 +133,7 @@ impl NetworkConfig {
             );
             network.set_location(id, host_name);
         }
+        network.set_location(runner_id, "master");
 
         // Add links
         if let NetworkConfig::TopologyAware {

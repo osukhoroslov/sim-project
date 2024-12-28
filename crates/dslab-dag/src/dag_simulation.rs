@@ -70,7 +70,7 @@ impl DagSimulation {
         if !self.resource_configs.iter().any(|r| r.name == "master") {
             self.add_resource("master", 1., 1, 0);
         }
-        let mut resources = self
+        let resources = self
             .resource_configs
             .iter()
             .map(|r| {
@@ -97,9 +97,6 @@ impl DagSimulation {
 
         self.add_input_output_tasks(&mut dag);
 
-        let runner_id = self.sim.create_context("runner").id();
-        resources.iter_mut().find(|r| r.name == "master").unwrap().id = runner_id;
-
         let runner = Rc::new(RefCell::new(DAGRunner::new(
             dag,
             network.clone(),
@@ -108,8 +105,8 @@ impl DagSimulation {
             self.config.clone(),
             self.sim.create_context("runner"),
         )));
-        self.sim.add_handler("runner", runner.clone());
-        self.network_config.init_network(network, &resources);
+        let runner_id = self.sim.add_handler("runner", runner.clone());
+        self.network_config.init_network(network, runner_id, &resources);
         let client = self.sim.create_context("client");
         client.emit_now(Start {}, runner_id);
         runner
