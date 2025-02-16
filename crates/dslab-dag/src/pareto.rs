@@ -38,6 +38,7 @@ pub struct ParetoSimulationResult {
 }
 
 pub struct ParetoSimulation {
+    seed: u64,
     dag: DAG,
     resources: Vec<ResourceConfig>,
     network: NetworkConfig,
@@ -48,6 +49,7 @@ pub struct ParetoSimulation {
 
 impl ParetoSimulation {
     pub fn new(
+        seed: u64,
         dag: DAG,
         resources: Vec<ResourceConfig>,
         network: NetworkConfig,
@@ -56,6 +58,7 @@ impl ParetoSimulation {
         billing_interval: Option<f64>,
     ) -> Self {
         Self {
+            seed,
             dag,
             resources,
             network,
@@ -95,32 +98,23 @@ impl ParetoSimulation {
         let schedulers = self
             .scheduler
             .borrow_mut()
-            .find_pareto_front(fake_runner.get_dag(), system, config, fake_runner.get_context())
+            .find_pareto_front(fake_runner.get_dag(), system, config.clone(), fake_runner.get_context())
             .into_iter()
             .map(|x| Box::new(PredefinedActionsScheduler::new(x)))
             .collect::<Vec<_>>();
         let pool = ThreadPool::new(num_threads);
         let results = Arc::new(Mutex::new(Vec::new()));
         for scheduler_box in schedulers.into_iter() {
+            let seed = self.seed;
             let results = results.clone();
             let resources = self.resources.clone();
             let network = self.network.clone();
-            let data_transfer_mode = self.data_transfer_mode;
-            let billing_interval = self.billing_interval;
+            let config = config.clone();
             let dag = self.dag.clone();
             pool.execute(move || {
                 let scheduler = Rc::new(RefCell::new(*scheduler_box));
 
-                let mut sim = DagSimulation::new(
-                    123,
-                    resources,
-                    network,
-                    scheduler,
-                    Config {
-                        data_transfer_mode,
-                        billing_interval: billing_interval.unwrap_or(1.0),
-                    },
-                );
+                let mut sim = DagSimulation::new(seed, resources, network, scheduler, config);
 
                 let runner = sim.init(dag);
 

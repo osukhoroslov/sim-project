@@ -58,6 +58,7 @@ fn main() {
     );
 
     let moheft_sim = ParetoSimulation::new(
+        123,
         dag,
         read_resource_configs(&args.system),
         read_network_config(&args.system),
