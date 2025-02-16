@@ -107,7 +107,6 @@ impl Task {
     pub fn is_allowed_on(&self, resource_id: usize) -> bool {
         self.resource_restrictions
             .iter()
-            .map(|rr| rr.is_allowed_on(resource_id))
-            .all(|x| x)
+            .all(|rr| rr.is_allowed_on(resource_id))
     }
 }

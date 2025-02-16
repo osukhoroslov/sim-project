@@ -7,6 +7,8 @@ use crate::system::System;
 /// Contains metrics collected from a simulation run.
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
 pub struct RunStats {
+    /// Workflow makespan, calculated as the last event time.
+    pub makespan: f64,
     /// Makespan expected by the scheduling algorithm (for static algorithms only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_makespan: Option<f64>,
@@ -18,8 +20,6 @@ pub struct RunStats {
     pub total_network_traffic: f64,
     /// Total time of data transfers over the network (in seconds).
     pub total_network_time: f64,
-    /// Workload makespan, calculated as the last event time.
-    pub makespan: f64,
     /// Maximum number of cores used at once.
     pub max_used_cores: u32,
     /// Maximum amount of memory used at once.

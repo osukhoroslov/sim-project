@@ -1,4 +1,4 @@
-//! Pareto-efficient multiobjective DAG scheduling.
+//! Pareto-efficient multi-objective DAG scheduling.
 
 use std::boxed::Box;
 use std::cell::RefCell;
@@ -20,7 +20,7 @@ use crate::runner::Config;
 use crate::scheduler::{Action, Scheduler};
 use crate::system::System;
 
-/// This trait allows implementing multiobjective schedulers that find several schedules at once
+/// This trait allows implementing multi-objective schedulers that find several schedules at once
 /// (so-called Pareto front). These schedulers are always static.
 pub trait ParetoScheduler {
     fn find_pareto_front(
@@ -64,6 +64,7 @@ impl ParetoSimulation {
             billing_interval,
         }
     }
+
     /// Pareto schedulers are run as follows:
     ///    1) Run the scheduler in a fake simulation to produce Pareto front.
     ///    2) Run a separate simulation for each schedule in the Pareto front by using the stub scheduler.
@@ -138,7 +139,7 @@ impl ParetoSimulation {
     }
 }
 
-pub struct PredefinedActionsScheduler {
+struct PredefinedActionsScheduler {
     actions: Vec<Action>,
 }
 
